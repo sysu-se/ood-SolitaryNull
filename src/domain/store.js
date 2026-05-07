@@ -59,55 +59,6 @@ function createGameStore() {
                 }
             }
         }
-
-        // // 2. 同步笔记
-        // candidates.set(sudoku.getNotes());
-
-        // // 3. 同步探索模式状态
-        // if (session) {
-        //     const currentBranch = session.branches.get(session.currentBranchId);
-        //     const branchList = session.getBranchList();
-        //     exploreBranches.set(branchList);
-            
-        //     exploreStatus.set({
-        //         active: true,
-        //         currentBranchId: session.currentBranchId,
-        //         hasConflict: !sudoku.isComplete() && currentGrid.flat().every(v => v !== 0),
-        //         isRevisited: session.checkFailed(gameInstance),
-        //         canExploreUndo: gameInstance.canUndo(currentBranch.branchStartIndex),
-        //         canExploreRedo: gameInstance.canRedo()
-        //     });
-        // } else {
-        //     exploreStatus.set({ active: false });
-        //     exploreBranches.set([]);
-        // }
-    // 2. 探索模式状态计算
-        // const hasRuleConflict = invalidCells.length > 0;
-        // let isRevisited = false;
-        // let branchList = [];
-        // if (session) {
-        //     branchList = session.getBranchList();
-        //     exploreBranches.set(branchList);
-            
-        //     // 记忆检测：检查当前盘面是否曾在其他路径失败
-        //     isRevisited = session.checkFailed(gameInstance);
-            
-        //     // 冲突检测：如果当前有红字冲突，自动存入失败记忆
-        //     if (hasRuleConflict) {
-        //         session.recordFailure(gameInstance);
-        //     }
-
-        //     const currentBranch = session.branches.get(session.currentBranchId);
-        //     exploreStatus.set({
-        //         active: true,
-        //         currentBranchId: session.currentBranchId,
-        //         hasConflict: hasRuleConflict,
-        //         isRevisited: isRevisited,
-        //         canExploreUndo: gameInstance.canUndo(currentBranch.branchStartIndex),
-        //         canExploreRedo: gameInstance.canRedo()
-        //     });
-        // }
-
         if (session) {
         const currentBranch = session.branches.get(session.currentBranchId);
         exploreBranches.set(session.getBranchList());
@@ -280,7 +231,7 @@ function createGameStore() {
             sync();
             return newId;
         },
-        // L1: 观察级
+        // 观察级提示
         requestPositionHint() {
             if (!gameInstance) return;
             const nextMoves = gameInstance.getHintNextMoves();
@@ -289,13 +240,13 @@ function createGameStore() {
                 cursor.set(move.col, move.row);
                 sync({
                     showExplanation: true,
-                    hintLevelInfo: { name: 'L1 观察级', desc: '指出值得关注的位置，不给数字。' },
+                    hintLevelInfo: { name: '观察级提示', desc: '指出值得关注的位置，不给数字。' },
                     explanation: { row: move.row + 1, col: move.col + 1, text: generateReasonText(move.row, move.col, 'L1') }
                 });
             }
         },
 
-        // L2: 候选级
+        // 候选数提示
         applyCandidateHint(row, col) {
         if (!gameInstance) return;
         const hintSet = gameInstance.getHintCandidates(row, col);
@@ -305,7 +256,7 @@ function createGameStore() {
             // 提示也要保存到分支并弹出侧边栏
             if (session) session.updateCurrentSnapshot(gameInstance);
             sync({showExplanation: true,
-                hintLevelInfo: { name: 'L2 候选级', desc: '显示候选并解释排除依据。' },
+                hintLevelInfo: { name: '候选数提示', desc: '显示候选并解释排除依据。' },
                 explanation: {
                     row: row + 1,
                     col: col + 1,
@@ -314,7 +265,7 @@ function createGameStore() {
         }
     },
 
-        // L3: 决策级
+        // 答案提示
         applyAnswerHint(row, col) {
         if (!gameInstance) return;
         const success = gameInstance.applyAnswerHint(row, col);
@@ -322,7 +273,7 @@ function createGameStore() {
             if (hints && hints.useHint) hints.useHint();
             if (session) session.updateCurrentSnapshot(gameInstance);
             sync({showExplanation: true,
-                hintLevelInfo: { name: 'L3 决策级', desc: '直接给出确定数字并填入。' },
+                hintLevelInfo: { name: '答案提示', desc: '直接给出确定数字并填入。' },
                 explanation: {
                     row: row + 1,
                     col: col + 1,
@@ -366,16 +317,6 @@ function createGameStore() {
             const { x, y } = get(cursor); // 需要 import { get } from 'svelte/store'
             if (x === null || y === null) return;
 
-            // // 2. 获取当前格子的正确答案
-            // const solution = solveSudoku(gameInstance.getInitialGrid());
-            // const correctValue = solution[y][x];
-
-            // // 3. 执行领域层的 guess 操作 (validate 设为 false，因为答案肯定是合法的)
-            // this.guess(y, x, correctValue);
-            
-            // // 4. 消耗一个提示次数
-            // hints.useHint(); 
-            // 使用新的提示系统
             this.applyAnswerHint(y, x);
         },
         /**

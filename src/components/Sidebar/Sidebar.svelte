@@ -57,22 +57,6 @@ $: state = $gameStore;
     border: 1px solid #cbd5e1;
   }
 
-  .hint-level-label {
-    font-size: 10px;
-  }
-
-  .hint-level-name {
-    font-size: 14px;
-    font-weight: 700;
-    color: #1e293b;
-    margin-top: 2px;
-  }
-
-  .hint-level-desc {
-    font-size: 11px;
-    color: #64748b;
-  }
-
   .explanation-body {
     min-height: 100px;
   }
@@ -83,35 +67,12 @@ $: state = $gameStore;
     margin-bottom: 12px;
   }
 
-  .badge-pos {
-    background: #e0e7ff;
-    color: #4338ca;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: 600;
-  }
-
   .text-content {
     font-size: 14px;
     line-height: 1.6;
     color: #334155;
     background: #fff;
     padding: 4px;
-  }
-
-  .empty-state {
-    text-align: center;
-    padding: 20px 10px;
-    color: #94a3b8;
-  }
-
-  .close-button {
-    transition: transform 0.2s ease;
-  }
-
-  .close-button:hover {
-    transform: scale(1.1);
   }
   .pop-up {
     position: fixed;

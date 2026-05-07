@@ -291,18 +291,6 @@
     background: #eff6ff;
   }
 
-  .branch-marker {
-    width: 9px;
-    height: 9px;
-    border-radius: 999px;
-    background: #94a3b8;
-    flex: 0 0 auto;
-  }
-
-  .branch-current .branch-marker {
-    background: #2563eb;
-  }
-
   .branch-main {
     min-width: 0;
     flex: 1;
