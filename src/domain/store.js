@@ -14,10 +14,9 @@ import { gamePaused } from '@sudoku/stores/game';
 import { grid as legacyGridStore } from '@sudoku/stores/grid';
 import { ExploreSession } from './index.js';
 function createGameStore() {
-    const exploreStatus = writable({ active: false, hasConflict: false, isRevisited: false });
+    const exploreStatus = writable({ active: false, canExploreUndo: false, canExploreRedo: false });
     const exploreBranches = writable([]);
-    const hintLevelInfo = writable({ name: '等待指令', desc: '请选择一种提示方式' });
-
+    
     const state = writable({
         grid: Array(9).fill(0).map(() => Array(9).fill(0)),
         initialGrid: Array(9).fill(0).map(() => Array(9).fill(0)),
@@ -43,65 +42,119 @@ function createGameStore() {
         return "";
     };
     // 解决问题 6: 封装边界，不直接读取内部字段
-    const sync = (extraState = {}) => {
+    const sync = (extra = {}) => {
         if (!gameInstance) return;
         const sudoku = gameInstance.getSudoku();
-        const fingerprint = sudoku.getFingerprint();
-
-        // 同步分支信息
-        if (session) {
-            exploreBranches.set(session.getBranchList());
-            const isConflict = !sudoku.isComplete() && sudoku.getGrid().flat().every(v => v !== 0); 
-            // 简单的冲突逻辑：填满了但不正确
-            
-            // 失败记忆检查
-            const isRevisited = session.checkFailed(gameInstance);
-            
-            exploreStatus.set({
-                active: true,
-                hasConflict: isConflict,
-                isRevisited: isRevisited,
-                currentBranchId: session.currentBranchId,
-                canExploreUndo: gameInstance.canUndo(), // 复用 Game 的能力
-                canExploreRedo: gameInstance.canRedo()
-            });
-
-            // 如果当前发现冲突，自动记录到失败记忆
-            if (isConflict) session.recordFailure(fingerprint);
-        } else {
-            exploreStatus.set({ active: false });
-            exploreBranches.set([]);
-        }
         const currentGrid = sudoku.getGrid();
-        candidates.set(sudoku.getNotes());
-        const invalidCells = []; // 逻辑同前...
-		for (let r = 0; r < 9; r++) {
-			for (let c = 0; c < 9; c++) {
-				const val = currentGrid[r][c];
-				if (val !== 0 && val !== null) {
-					// 核心逻辑：
-					// 如果当前棋盘在 (r,c) 位置的值 val，
-					// 与棋盘中其他位置的值冲突，则判定为 invalid
-					if (!isValidPlacement(currentGrid, r, c, val)) {
-						// 格式必须与 Board.svelte 中的 $candidates[x + ',' + y] 对应
-						// 即 "列索引,行索引"
-						invalidCells.push(`${c},${r}`);
-					}
-				}
-			}
-		}
+        
+        // 1. 计算冲突
+        const invalidCells = [];
+        for (let r = 0; r < 9; r++) {
+            for (let c = 0; c < 9; c++) {
+                const val = currentGrid[r][c];
+                if (val !== 0 && val !== null) {
+                    if (!isValidPlacement(currentGrid, r, c, val)) {
+                        invalidCells.push(`${c},${r}`);
+                    }
+                }
+            }
+        }
+
+        // // 2. 同步笔记
+        // candidates.set(sudoku.getNotes());
+
+        // // 3. 同步探索模式状态
+        // if (session) {
+        //     const currentBranch = session.branches.get(session.currentBranchId);
+        //     const branchList = session.getBranchList();
+        //     exploreBranches.set(branchList);
+            
+        //     exploreStatus.set({
+        //         active: true,
+        //         currentBranchId: session.currentBranchId,
+        //         hasConflict: !sudoku.isComplete() && currentGrid.flat().every(v => v !== 0),
+        //         isRevisited: session.checkFailed(gameInstance),
+        //         canExploreUndo: gameInstance.canUndo(currentBranch.branchStartIndex),
+        //         canExploreRedo: gameInstance.canRedo()
+        //     });
+        // } else {
+        //     exploreStatus.set({ active: false });
+        //     exploreBranches.set([]);
+        // }
+    // 2. 探索模式状态计算
+        // const hasRuleConflict = invalidCells.length > 0;
+        // let isRevisited = false;
+        // let branchList = [];
+        // if (session) {
+        //     branchList = session.getBranchList();
+        //     exploreBranches.set(branchList);
+            
+        //     // 记忆检测：检查当前盘面是否曾在其他路径失败
+        //     isRevisited = session.checkFailed(gameInstance);
+            
+        //     // 冲突检测：如果当前有红字冲突，自动存入失败记忆
+        //     if (hasRuleConflict) {
+        //         session.recordFailure(gameInstance);
+        //     }
+
+        //     const currentBranch = session.branches.get(session.currentBranchId);
+        //     exploreStatus.set({
+        //         active: true,
+        //         currentBranchId: session.currentBranchId,
+        //         hasConflict: hasRuleConflict,
+        //         isRevisited: isRevisited,
+        //         canExploreUndo: gameInstance.canUndo(currentBranch.branchStartIndex),
+        //         canExploreRedo: gameInstance.canRedo()
+        //     });
+        // }
+
+        if (session) {
+        const currentBranch = session.branches.get(session.currentBranchId);
+        exploreBranches.set(session.getBranchList());
+        
+        // 如果当前有红字冲突，记录为失败路径
+        if (invalidCells.length > 0) session.recordFailure(gameInstance);
+
+        exploreStatus.set({
+            active: true,
+            currentBranchId: session.currentBranchId,
+            hasConflict: invalidCells.length > 0,
+            isRevisited: session.checkFailed(gameInstance),
+            canExploreUndo: gameInstance.canUndo(currentBranch.branchStartIndex),
+            canExploreRedo: gameInstance.canRedo()
+        });
+    } else {
+        // 显式关闭状态
+        exploreStatus.set({ active: false });
+        exploreBranches.set([]);
+    }
+
+        // // 4. 【核心修复】将 extra 合并到 state 中，并正确同步计算结果
+        // state.update(s => ({
+        //     ...s,
+        //     grid: currentGrid,
+        //     initialGrid: gameInstance.getInitialGrid(),
+        //     canUndo: gameInstance.canUndo(),
+        //     canRedo: gameInstance.canRedo(),
+        //     isComplete: gameInstance.isComplete(),
+        //     invalidCells: invalidCells, // 修复：不再写死 []
+        //     isExploring: !!session,
+        //     ...extra // 修复：允许传入 showExplanation, showExplore 等
+        // }));
+        // 3. 更新主状态
         state.update(s => ({
             ...s,
-            grid: sudoku.getGrid(),
+            grid: currentGrid,
             initialGrid: gameInstance.getInitialGrid(),
-            canUndo: gameInstance.canUndo(),
-            canRedo: gameInstance.canRedo(),
-            isComplete: gameInstance.isComplete(),
-            invalidCells: [], // 冲突计算逻辑同前
-            ...extraState
+            // 核心要求：探索模式开启时，禁用全局 Undo/Redo
+            canUndo: session ? false : gameInstance.canUndo(),
+            canRedo: session ? false : gameInstance.canRedo(),
+            isComplete: sudoku.isComplete(),
+            invalidCells,
+            isExploring: !!session,
+            ...extra
         }));
-		console.log(invalidCells);
-        // 解决问题 1: legacyGridStore 仅作为“投影”存在，不作为逻辑源
+        candidates.set(sudoku.getNotes());
         legacyGridStore.set(gameInstance.getInitialGrid());
     };
 
@@ -150,111 +203,133 @@ function createGameStore() {
 
         createExploreBranch(label) {
             if (!session) return;
+            session.updateCurrentSnapshot(gameInstance);
             const id = session.createBranch(label, gameInstance);
             sync();
             return id;
         },
 
         switchExploreBranch(id) {
-            if (!session) return;
-            const branch = session.branches.get(id);
-            gameInstance.loadSnapshot(branch.snapshot);
+            if (!session || id === session.currentBranchId) return;
+            session.updateCurrentSnapshot(gameInstance);
+            const target = session.branches.get(id);
+            gameInstance.loadSnapshot(target.snapshot);
             session.currentBranchId = id;
             sync();
         },
 
         backtrackExplore() {
             if (!session) return;
-            // 回到最初起点
-            gameInstance.loadSnapshot(session.rootSnapshot);
-            session.currentBranchId = 0;
+            const currentBranch = session.branches.get(session.currentBranchId);
+            // 回到该分支刚刚创建时的那一刻
+            gameInstance.loadSnapshot(currentBranch.snapshot);
             sync();
         },
 
         commitExplore() {
-            // 提交：保留当前棋盘，销毁会话
+            if (!session) return;
+            // 逻辑：保留当前 gameInstance，销毁 session
             session = null;
-            sync();
+            // 状态更新：关闭面板，关闭开关
+            sync({ showExplore: false }); 
         },
-
         cancelExplore() {
-            // 如果 session 根本没创建（比如初始化失败），直接返回
-            if (!session) {
-                sync();
-                return;
-            }
-            
-            const rootJSON = session.rootSnapshot;
-            gameInstance.loadSnapshot(rootJSON);
+            if (!session) return;
+            // 逻辑：恢复到进入探索前的 rootSnapshot
+            gameInstance.loadSnapshot(session.rootSnapshot);
             session = null;
-            sync();
+            // 状态更新：关闭面板，关闭开关
+            sync({ showExplore: false });
         },
 
         // 探索模式下的撤销重做直接复用 Game 的
-        exploreUndo() { gameInstance.undo(); sync(); },
-        exploreRedo() { gameInstance.redo(); sync(); },
+        exploreUndo() {
+            if (!session) return;
+            const currentBranch = session.branches.get(session.currentBranchId);
+            gameInstance.undo(currentBranch.branchStartIndex);
+            sync();
+        },
+
+        exploreRedo() {
+            gameInstance.redo();
+            sync();
+        },
+        // 切换分支
+        switchExploreBranch(id) {
+            if (!session || id === session.currentBranchId) return;
+            
+            // 1. 保存当前分支的现状
+            session.updateCurrentSnapshot(gameInstance);
+            
+            // 2. 加载目标分支的快照
+            const targetBranch = session.branches.get(id);
+            gameInstance.loadSnapshot(targetBranch.snapshot);
+            
+            // 3. 更新会话状态
+            session.currentBranchId = id;
+            sync();
+        },
+
+        // 创建分支
+        createExploreBranch(label) {
+            if (!session) return;
+            // 1. 先保存当前进度到旧分支
+            session.updateCurrentSnapshot(gameInstance);
+            // 2. 创建新分支（内部会自动切换 currentBranchId）
+            const newId = session.createBranch(label, gameInstance);
+            sync();
+            return newId;
+        },
         // L1: 观察级
         requestPositionHint() {
             if (!gameInstance) return;
             const nextMoves = gameInstance.getHintNextMoves();
             if (nextMoves.length > 0) {
                 const move = nextMoves[0];
-                cursor.set(move.col, move.row); 
-                
-                // 通过 sync 一次性更新所有状态
+                cursor.set(move.col, move.row);
                 sync({
                     showExplanation: true,
                     hintLevelInfo: { name: 'L1 观察级', desc: '指出值得关注的位置，不给数字。' },
-                    explanation: {
-                        row: move.row + 1,
-                        col: move.col + 1,
-                        text: generateReasonText(move.row, move.col, 'L1')
-                    }
+                    explanation: { row: move.row + 1, col: move.col + 1, text: generateReasonText(move.row, move.col, 'L1') }
                 });
             }
         },
 
         // L2: 候选级
         applyCandidateHint(row, col) {
-            if (!gameInstance) return;
-            const hintSet = gameInstance.getHintCandidates(row, col);
-            
-            if (hintSet && hintSet.size > 0) {
-                const cList = Array.from(hintSet);
-                // 执行领域逻辑
-                gameInstance.guess({ row, col, value: cList, type: 'note-set' }, false);
-                
-                // 同步
-                sync({
-                    showExplanation: true,
-                    hintLevelInfo: { name: 'L2 候选级', desc: '显示候选并解释排除依据。' },
-                    explanation: {
-                        row: row + 1,
-                        col: col + 1,
-                        text: generateReasonText(row, col, 'L2', cList)
-                    }
-                });
-            }
-        },
+        if (!gameInstance) return;
+        const hintSet = gameInstance.getHintCandidates(row, col);
+        if (hintSet && hintSet.size > 0) {
+            const cList = Array.from(hintSet);
+            gameInstance.guess({ row, col, value: cList, type: 'note-set' }, false);
+            // 提示也要保存到分支并弹出侧边栏
+            if (session) session.updateCurrentSnapshot(gameInstance);
+            sync({showExplanation: true,
+                hintLevelInfo: { name: 'L2 候选级', desc: '显示候选并解释排除依据。' },
+                explanation: {
+                    row: row + 1,
+                    col: col + 1,
+                    text: generateReasonText(row, col, 'L2', cList)
+                }});
+        }
+    },
 
         // L3: 决策级
         applyAnswerHint(row, col) {
-            if (!gameInstance) return;
-            const success = gameInstance.applyAnswerHint(row, col);
-            if (success) {
-                if (hints && hints.useHint) hints.useHint();
-                
-                sync({
-                    showExplanation: true,
-                    hintLevelInfo: { name: 'L3 决策级', desc: '直接给出确定数字并填入。' },
-                    explanation: {
-                        row: row + 1,
-                        col: col + 1,
-                        text: generateReasonText(row, col, 'L3')
-                    }
-                });
-            }
-        },
+        if (!gameInstance) return;
+        const success = gameInstance.applyAnswerHint(row, col);
+        if (success) {
+            if (hints && hints.useHint) hints.useHint();
+            if (session) session.updateCurrentSnapshot(gameInstance);
+            sync({showExplanation: true,
+                hintLevelInfo: { name: 'L3 决策级', desc: '直接给出确定数字并填入。' },
+                explanation: {
+                    row: row + 1,
+                    col: col + 1,
+                    text: generateReasonText(row, col, 'L3')
+                }});
+        }
+    },
 
         closeExplanation() {
             state.update(s => ({ ...s, explanation: null, showExplanation: false }));
@@ -330,26 +405,27 @@ function createGameStore() {
         },
         
         toggleNote(row, col, value) {
-            if (!gameInstance) return;
-            // 调用统一的 guess，确保笔记操作可撤销
-            gameInstance.guess({ row, col, value, type: 'note-toggle' }, false);
-            sync();
-        },
+        if (!gameInstance) return;
+        gameInstance.guess({ row, col, value, type: 'note-toggle' }, false);
+        this._afterWrite(); // 自动保存到分支
+    },
         clearNote(row, col) {
             if (!gameInstance) return;
             // 记录为一个 note-clear 类型的 move
             gameInstance.guess({ row, col, type: 'note-clear' }, false);
             sync();
         },
+        _afterWrite() {
+        if (session) session.updateCurrentSnapshot(gameInstance);
+        sync();
+    },
         guess(row, col, value) {
-            if (!gameInstance) return;
-            try {
-                gameInstance.guess({ row, col, value }, false);
-                sync();
-            } catch (e) {
-                console.warn(e.message);
-            }
-        },
+        if (!gameInstance) return;
+        try {
+            gameInstance.guess({ row, col, value }, false);
+            this._afterWrite(); // 自动保存到分支
+        } catch (e) { console.warn(e.message); }
+    },
 
         undo() { if (gameInstance) { gameInstance.undo(); sync(); } },
         redo() { if (gameInstance) { gameInstance.redo(); sync(); } },

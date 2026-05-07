@@ -420,11 +420,10 @@ class Game {
   /**
    * 撤销上一步操作
    */
-  undo() {
-    if (this.historyIndex > 0) {
+  undo(limitIndex = 0) {
+    if (this.canUndo(limitIndex)) {
       this.historyIndex--;
       this._rebuild();
-      this._invalidateSolutionCache();
     }
   }
 
@@ -459,8 +458,8 @@ class Game {
    * 检查是否可以撤销
    * @returns {boolean}
    */
-  canUndo() {
-    return this.historyIndex > 0;
+  canUndo(limitIndex = 0) {
+    return this.historyIndex > limitIndex;
   }
 
   /**
@@ -574,63 +573,72 @@ class ExploreBranch {
  */
 export class ExploreSession {
   constructor(rootGame) {
-    // 改进 1：直接通过 rootGame 获取初始快照
     this.rootSnapshot = rootGame.toJSON();
+    this.startIndex = rootGame.historyIndex; 
     this.branches = new Map();
-    this.failedFingerprints = new Set();
+    this.failedFingerprints = new Set(); 
     this.nextBranchId = 1;
     this.currentBranchId = 0;
 
-    // 默认创建主线分支
-    this.createBranch('初始分叉点', rootGame);
+    // 初始化根分支（主线）
+    this.branches.set(0, {
+      id: 0,
+      parentId: null,
+      label: '主线起点',
+      snapshot: this.rootSnapshot,
+      branchStartIndex: this.startIndex // 主线的撤销底线是进入探索时的位置
+    });
   }
 
+  // 创建分支：从当前所在位置切分出去
   createBranch(label, currentGame) {
     const id = this.nextBranchId++;
-    const branch = {
+    const newBranch = {
       id,
       parentId: this.currentBranchId,
-      label: label || `分支 #${id}`,
-      // 存储 Game 的快照，确保每个分支之间的数据彻底隔离
-      snapshot: currentGame.toJSON() 
+      label: label || `探索分支 #${id}`,
+      snapshot: currentGame.toJSON(),
+      // 关键：该分支的 Undo 底线是它创建时的那个步数
+      branchStartIndex: currentGame.historyIndex 
     };
-    this.branches.set(id, branch);
-    this.currentBranchId = id;
+    this.branches.set(id, newBranch);
+    this.currentBranchId = id; // 创建后自动切换到该分支
     return id;
   }
 
-  // 改进 2：指纹计算。本地 Sudoku 类已经有了 getFingerprint，直接调用
+  // 保存当前分支的最新状态快照
+  updateCurrentSnapshot(currentGame) {
+    const b = this.branches.get(this.currentBranchId);
+    if (b) b.snapshot = currentGame.toJSON();
+  }
+
   recordFailure(game) {
-    this.failedFingerprints.add(game.getSudoku().getFingerprint());
+    const fingerprint = game.getSudoku().getFingerprint();
+    this.failedFingerprints.add(fingerprint);
   }
 
   checkFailed(game) {
     return this.failedFingerprints.has(game.getSudoku().getFingerprint());
   }
 
-  // 改进 3：树形列表转换逻辑
+  // 获取树状结构的列表
   getBranchList() {
-    const items = Array.from(this.branches.values());
-    const depthMap = new Map();
-
-    const calculateDepth = (branchId) => {
-      if (branchId === 0) return 0;
-      if (depthMap.has(branchId)) return depthMap.get(branchId);
-      
-      const b = this.branches.get(branchId);
-      const d = b.parentId === null ? 0 : calculateDepth(b.parentId) + 1;
-      depthMap.set(branchId, d);
-      return d;
+    const list = Array.from(this.branches.values());
+    const calculateDepth = (id) => {
+      let depth = 0;
+      let curr = this.branches.get(id);
+      while (curr && curr.parentId !== null) {
+        curr = this.branches.get(curr.parentId);
+        depth++;
+      }
+      return depth;
     };
 
-    return items.map(b => ({
-      id: b.id,
-      parentId: b.parentId,
-      label: b.label,
-      current: b.id === this.currentBranchId,
-      depth: calculateDepth(b.id)
+    return list.map(b => ({
+      ...b,
+      depth: calculateDepth(b.id),
+      current: b.id === this.currentBranchId
     }));
   }
-  
 }
 

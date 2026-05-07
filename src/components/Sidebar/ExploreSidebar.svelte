@@ -1,12 +1,14 @@
 <script>
   import Switch from '../Utils/Switch.svelte';
-  export let gameStore;
   import { fly } from 'svelte/transition';
-  // 这里的订阅逻辑与你提供的 UI 一致
-  $: exploreStatus = gameStore.exploreStatus;
-  $: branches = gameStore.exploreBranches;
+
+  export let gameStore;
+
+  // 正确引用 Store 对象本身
+  const statusStore = gameStore.exploreStatus;
+  const branchesStore = gameStore.exploreBranches;
+
   $: gameState = $gameStore; 
-  $: isGameActive = gameState.initialGrid && gameState.initialGrid.some(row => row.some(cell => cell !== 0));
   let branchLabel = '';
 
   function handleCreate() {
@@ -14,48 +16,92 @@
     branchLabel = '';
   }
 </script>
-{#if gameState.showExplore}
-  <aside class="explore-sidebar" transition:fly={{ x: -340, duration: 400 }}>
+
+{#if $gameStore.showExplore}
+<aside class="explore-sidebar" transition:fly={{ x: -340, duration: 400 }}>
   <div class="sidebar-header">
-      <h2>探索模式</h2>
-      
-      <Switch 
-        id="explore-mode"
-        checked={$exploreStatus.active}
-        disabled={!isGameActive} 
-        on:change={(e) => e.detail ? gameStore.startExplore() : gameStore.cancelExplore()}
-      />
-      <button class="close-btn" on:click={gameStore.toggleExploreUI}>✕</button>
+    <h2>探索模式</h2>
+    <!-- 使用 $ 符号直接订阅 statusStore -->
+    <Switch 
+      checked={$statusStore.active} 
+      on:change={(e) => e.detail ? gameStore.startExplore() : gameStore.cancelExplore()} 
+    />
   </div>
-  {#if $exploreStatus.active}
-    <!-- 状态卡片 -->
-    <div class="status-card" class:status-conflict={$exploreStatus.hasConflict || $exploreStatus.isRevisited}>
-        {#if $exploreStatus.isRevisited}
-            ⚠️ 已重访失败路径！
-        {:else if $exploreStatus.hasConflict}
-            ❌ 发现逻辑冲突！
-        {:else}
-            ✨ 正在探索分支 #{$exploreStatus.currentBranchId}
-        {/if}
+
+  {#if $statusStore.active}
+    <div class="status-card" class:status-conflict={$statusStore.hasConflict || $statusStore.isRevisited}>
+        <div class="status-title">
+          {#if $statusStore.isRevisited} ⚠️ 重访失败路径 {:else if $statusStore.hasConflict} ❌ 发现冲突 {:else} ✨ 正在探索 {/if}
+        </div>
     </div>
 
-    <!-- 分支列表渲染 (保持你提供的树形 class 逻辑) -->
+    <div class="toolbar">
+      <button class="mini-button" disabled={!$statusStore.canExploreUndo} on:click={() => gameStore.exploreUndo()}>撤销</button>
+      <button class="mini-button" disabled={!$statusStore.canExploreRedo} on:click={() => gameStore.exploreRedo()}>重做</button>
+      <button class="mini-button primary" on:click={() => gameStore.backtrackExplore()}>回起点</button>
+    </div>
+
+    <div class="branch-create">
+      <input class="branch-input" placeholder="新分支名称" bind:value={branchLabel} />
+      <button class="mini-button primary" on:click={handleCreate}>新建</button>
+    </div>
+
+    <div class="section-title">分支列表 ({$branchesStore.length})</div>
     <div class="branch-list">
-      {#each $branches as branch}
-        <button 
-          class="branch-row branch-depth-{branch.depth}" 
-          class:branch-current={branch.current}
-          on:click={() => gameStore.switchExploreBranch(branch.id)}
-        >
-          {branch.label}
-        </button>
-      {/each}
+  {#each $branchesStore as branch}
+    <div class="flex items-center">
+      <!-- 视觉缩进：即便 depth 很大也通过 ID 标识父级 -->
+      <button 
+        class="branch-row branch-depth-{Math.min(branch.depth, 3)}" 
+        class:branch-current={branch.current}
+        class:border-red-400={branch.isFailed}
+        on:click={() => gameStore.switchExploreBranch(branch.id)}
+      >
+        <div class="branch-main">
+          <div class="flex justify-between items-center">
+            <span class="branch-name">{branch.label}</span>
+            <span class="text-[10px] bg-gray-200 px-1 rounded">ID: #{branch.id}</span>
+          </div>
+          <span class="branch-meta">
+            {#if branch.parentId !== null}
+              继承自分支 #{branch.parentId}
+            {:else}
+              🌱 初始宇宙
+            {/if}
+          </span>
+        </div>
+        {#if branch.current}
+          <span class="current-pill">当前</span>
+        {/if}
+      </button>
     </div>
+  {/each}
+</div>
+<!-- 状态卡片增加记忆反馈 -->
+{#if $statusStore.active}
+  <div class="status-card" class:status-conflict={$statusStore.hasConflict || $statusStore.isRevisited}>
+    <div class="status-title">
+      {#if $statusStore.isRevisited}
+        🚫 此路径已知失败（记忆命中）
+      {:else if $statusStore.hasConflict}
+        ❌ 当前发现冲突
+      {:else}
+        ✨ 正在探索...
+      {/if}
+    </div>
+    <div class="text-[11px] mt-1 opacity-80">
+      探索模式下，主界面的撤销已禁用，请使用下方局部控制。
+    </div>
+  </div>
+{/if}
 
-    <!-- 底部操作 -->
-    <div class="finish-actions">
-        <button class="finish-button" on:click={() => gameStore.commitExplore()}>提交</button>
-        <button class="finish-button danger" on:click={() => gameStore.cancelExplore()}>放弃</button>
+    <div class="finish-actions mt-4">
+      <button class="finish-button" on:click={() => gameStore.commitExplore()}>提交探索</button>
+      <button class="finish-button danger" on:click={() => gameStore.cancelExplore()}>放弃探索</button>
+    </div>
+  {:else}
+    <div class="empty-state text-sm text-gray-500">
+      开启探索模式后，您可以在不同的平行宇宙之间切换。
     </div>
   {/if}
 </aside>
@@ -63,6 +109,17 @@
 
 
 <style>
+  .branch-depth-1 { margin-left: 15px; width: calc(100% - 15px); }
+  .branch-depth-2 { margin-left: 30px; width: calc(100% - 30px); }
+  .branch-depth-3 { margin-left: 45px; width: calc(100% - 45px); }
+
+  .branch-connector {
+    width: 10px; height: 1px; @apply bg-gray-400 mr-2;
+  }
+  .toolbar, .branch-create { @apply flex gap-2 mb-4; }
+  .branch-input { @apply flex-grow border p-1 rounded text-sm; }
+  .mini-button { @apply px-3 py-1 bg-gray-100 rounded text-xs font-bold; }
+  .primary { @apply bg-blue-600 text-white; }
   .explore-sidebar {
     position: fixed;
     left: 12px;
