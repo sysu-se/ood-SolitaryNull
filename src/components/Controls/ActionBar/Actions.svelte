@@ -18,14 +18,15 @@
 
 	function handleCandidateHint() {
 		const { x, y } = $cursor;
-		if (x === null || y === null) return;
-		// 不再 alert，直接修改状态
-		gameStore.applyCandidateHint(y, x);
+		if (x === null) return;
+		// 先清空旧内容，让用户看到“跳变”感
+		gameStore.closeExplanation();
+		setTimeout(() => gameStore.applyCandidateHint(y, x), 10);
 	}
 
 	function handleNextMovesHint() {
-		// 自动寻找并填入一个数字
-		gameStore.applyNextMoveHint();
+		// 逻辑改为：仅请求位置提示
+    	gameStore.requestPositionHint();
 	}
 </script>
 

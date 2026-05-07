@@ -7,6 +7,7 @@
 	import Controls from './components/Controls/index.svelte';
 	import Header from './components/Header/index.svelte';
 	import Modal from './components/Modal/index.svelte';
+	import Sidebar from './components/Sidebar/Sidebar.svelte';
 	import { gameStore } from './domain/store.js';
 	gameStore.subscribe(state => {
 		if (state.isComplete) {
@@ -36,11 +37,15 @@
 	<Header />
 </header>
 
-<!-- Sudoku Field -->
-<section>
-	<Board />
-</section>
 
+<main class="flex">
+    <section class="flex-grow">
+        <Board />
+    </section>
+    
+    <!-- 接入侧边栏 -->
+    <Sidebar {gameStore} />
+</main>
 <!-- Keyboard -->
 <footer>
 	<Controls />

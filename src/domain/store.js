@@ -14,19 +14,31 @@ import { gamePaused } from '@sudoku/stores/game';
 import { grid as legacyGridStore } from '@sudoku/stores/grid';
 
 function createGameStore() {
-    const { subscribe, set } = writable({
+    const explanation = writable(null);
+    const hintLevelInfo = writable({ name: '等待指令', desc: '请选择一种提示方式' });
+
+    const state = writable({
         grid: Array(9).fill(0).map(() => Array(9).fill(0)),
         initialGrid: Array(9).fill(0).map(() => Array(9).fill(0)),
         canUndo: false,
         canRedo: false,
         isComplete: false,
-        invalidCells: []
+        invalidCells: [],
+        explanation: null, 
+        hintLevelInfo: { name: '等待指令', desc: '请选择一种提示方式' }
     });
 
     let gameInstance = null;
-
+   const generateReasonText = (row, col, type, candidates = []) => {
+        const r = row + 1;
+        const c = col + 1;
+        if (type === 'L1') return `【逻辑扫描】在第 ${r} 行第 ${c} 列发现突破口。根据排除法，该位置目前只有一个合法的数字可以填入，建议优先观察此处。`;
+        if (type === 'L2') return `【候选分析】已对第 ${r} 行第 ${c} 列进行了深度扫描。排除了同行、同列及同宫的干扰项，剩下的可能性（${candidates.join(', ')}）已为你标记。`;
+        if (type === 'L3') return `【决策辅助】经过全局唯一解计算，确定第 ${r} 行第 ${c} 列的最终答案。该步骤已录入历史记录，你可以随时撤销。`;
+        return "";
+    };
     // 解决问题 6: 封装边界，不直接读取内部字段
-    const sync = () => {
+    const sync = (extraState = {}) => {
         if (!gameInstance) return;
         const sudoku = gameInstance.getSudoku();
         const currentGrid = sudoku.getGrid();
@@ -47,14 +59,16 @@ function createGameStore() {
 				}
 			}
 		}
-        set({
-            grid: currentGrid,
-            initialGrid: gameInstance.getInitialGrid(), // 改为调用显式接口
+        state.update(s => ({
+            ...s,
+            grid: sudoku.getGrid(),
+            initialGrid: gameInstance.getInitialGrid(),
             canUndo: gameInstance.canUndo(),
             canRedo: gameInstance.canRedo(),
             isComplete: gameInstance.isComplete(),
-            invalidCells
-        });
+            invalidCells: [], // 冲突计算逻辑同前
+            ...extraState
+        }));
 		console.log(invalidCells);
         // 解决问题 1: legacyGridStore 仅作为“投影”存在，不作为逻辑源
         legacyGridStore.set(gameInstance.getInitialGrid());
@@ -88,7 +102,71 @@ function createGameStore() {
 };
 
     return {
-        subscribe,
+        subscribe: state.subscribe,
+
+        // L1: 观察级
+        requestPositionHint() {
+            if (!gameInstance) return;
+            const nextMoves = gameInstance.getHintNextMoves();
+            if (nextMoves.length > 0) {
+                const move = nextMoves[0];
+                cursor.set(move.col, move.row); 
+                
+                // 通过 sync 一次性更新所有状态
+                sync({
+                    hintLevelInfo: { name: 'L1 观察级', desc: '指出值得关注的位置，不给数字。' },
+                    explanation: {
+                        row: move.row + 1,
+                        col: move.col + 1,
+                        text: generateReasonText(move.row, move.col, 'L1')
+                    }
+                });
+            }
+        },
+
+        // L2: 候选级
+        applyCandidateHint(row, col) {
+            if (!gameInstance) return;
+            const hintSet = gameInstance.getHintCandidates(row, col);
+            
+            if (hintSet && hintSet.size > 0) {
+                const cList = Array.from(hintSet);
+                // 执行领域逻辑
+                gameInstance.guess({ row, col, value: cList, type: 'note-set' }, false);
+                
+                // 同步
+                sync({
+                    hintLevelInfo: { name: 'L2 候选级', desc: '显示候选并解释排除依据。' },
+                    explanation: {
+                        row: row + 1,
+                        col: col + 1,
+                        text: generateReasonText(row, col, 'L2', cList)
+                    }
+                });
+            }
+        },
+
+        // L3: 决策级
+        applyAnswerHint(row, col) {
+            if (!gameInstance) return;
+            const success = gameInstance.applyAnswerHint(row, col);
+            if (success) {
+                if (hints && hints.useHint) hints.useHint();
+                
+                sync({
+                    hintLevelInfo: { name: 'L3 决策级', desc: '直接给出确定数字并填入。' },
+                    explanation: {
+                        row: row + 1,
+                        col: col + 1,
+                        text: generateReasonText(row, col, 'L3')
+                    }
+                });
+            }
+        },
+
+        closeExplanation() {
+            state.update(s => ({ ...s, explanation: null }));
+        },
         
         startNew(difficultyValue) {
             resetSession();
@@ -140,33 +218,7 @@ function createGameStore() {
             return gameInstance.getHintNextMoves();
         },
 
-        /**
-         * 应用答案提示 (改进版)
-         * @param {number} row - 行索引
-         * @param {number} col - 列索引
-         * @returns {boolean} 操作是否成功
-         */
-        applyAnswerHint(row, col) {
-            if (!gameInstance) return false;
-
-            const success = gameInstance.applyAnswerHint(row, col);
-            if (success) {
-                // 消耗一个提示次数
-                if (hints && hints.useHint) {
-                    hints.useHint();
-                }
-                
-                // 清除该格的笔记
-                if (candidates && candidates.clear) {
-                    candidates.clear({ x: col, y: row });
-                }
-                
-                // 同步状态到 Store
-                sync();
-                return true;
-            }
-            return false;
-        },
+        
         /**
          * 获取指定格子的候选数提示
          * @param {number} row - 行索引 (0-8)
@@ -182,43 +234,7 @@ function createGameStore() {
                 return null;
             }
         },
-        applyCandidateHint(row, col) {
-            if (!gameInstance) return;
-            const hintSet = gameInstance.getHintCandidates(row, col);
-            if (hintSet && hintSet.size > 0) {
-                // 使用新定义的 note-set 类型，确保进入 Undo 历史
-                gameInstance.guess({ 
-                    row, 
-                    col, 
-                    value: Array.from(hintSet), 
-                    type: 'note-set' 
-                }, false);
-                sync();
-            }
-        },
-
-        /**
-         * 改进：下一步提示改为直接填入一个确定的数字
-         */
-        applyNextMoveHint() {
-            if (!gameInstance) return;
-            
-            // 检查次数
-            const currentHints = get(hints);
-            if (currentHints <= 0) {
-                alert('No hints available!');
-                return;
-            }
-
-            const nextMoves = gameInstance.getHintNextMoves();
-            if (nextMoves.length > 0) {
-                const move = nextMoves[0];
-                this.guess(move.row, move.col, move.value);
-                hints.useHint();
-            } else {
-                alert('No obvious moves available');
-            }
-        },
+        
         toggleNote(row, col, value) {
             if (!gameInstance) return;
             // 调用统一的 guess，确保笔记操作可撤销

@@ -23,9 +23,17 @@
 	}
 
 	function getValueAtCursor(gridStore, cursorStore) {
-		if (cursorStore.x === null && cursorStore.y === null) return null;
+		// 1. 检查 gridStore 是否存在且有数据
+		if (!gridStore || !gridStore.length || !gridStore[0]) return null;
 
-		return gridStore[cursorStore.y][cursorStore.x];
+		// 2. 检查光标：只要有一个是 null，就无法获取值 (逻辑从 && 改为 ||)
+		if (cursorStore.x === null || cursorStore.y === null) return null;
+
+		// 3. 安全读取行
+		const row = gridStore[cursorStore.y];
+		if (!row) return null;
+
+		return row[cursorStore.x];
 	}
 </script>
 
