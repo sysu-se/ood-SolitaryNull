@@ -1,8 +1,10 @@
 <script>
   export let gameStore;
+  import { fly } from 'svelte/transition';
 $: state = $gameStore; 
 </script>
-<aside class="ai-sidebar">
+{#if state.showExplanation}
+<aside class="ai-sidebar" transition:fly={{ x: 300, duration: 400 }}>
   <div class="sidebar-header">
     <strong>提示解释</strong>
     <button class="close-button" on:click={gameStore.closeExplanation}>✕</button>
@@ -22,7 +24,7 @@ $: state = $gameStore;
     {/if}
   </div>
 </aside>
-
+{/if}
 <style>
   .ai-sidebar {
     position: fixed;
@@ -111,4 +113,13 @@ $: state = $gameStore;
   .close-button:hover {
     transform: scale(1.1);
   }
+  .pop-up {
+    position: fixed;
+    right: 20px;
+    top: 100px;
+    z-index: 100;
+    /* 增加阴影使其更有弹窗感 */
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  }
+  
 </style>

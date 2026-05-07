@@ -12,9 +12,10 @@ import { candidates } from '@sudoku/stores/candidates';
 import { difficulty as legacyDifficultyStore } from '@sudoku/stores/difficulty';
 import { gamePaused } from '@sudoku/stores/game';
 import { grid as legacyGridStore } from '@sudoku/stores/grid';
-
+import { ExploreSession } from './index.js';
 function createGameStore() {
-    const explanation = writable(null);
+    const exploreStatus = writable({ active: false, hasConflict: false, isRevisited: false });
+    const exploreBranches = writable([]);
     const hintLevelInfo = writable({ name: '等待指令', desc: '请选择一种提示方式' });
 
     const state = writable({
@@ -25,10 +26,14 @@ function createGameStore() {
         isComplete: false,
         invalidCells: [],
         explanation: null, 
-        hintLevelInfo: { name: '等待指令', desc: '请选择一种提示方式' }
+        showExplanation: false, // 提示解释是否显示
+        showExplore: false,     // 探索面板是否显示
+        hintLevelInfo: { name: '等待指令', desc: '请选择一种提示方式' },
+        isExploring: false
     });
 
     let gameInstance = null;
+    let session = null; // ExploreSession 实例
    const generateReasonText = (row, col, type, candidates = []) => {
         const r = row + 1;
         const c = col + 1;
@@ -41,6 +46,32 @@ function createGameStore() {
     const sync = (extraState = {}) => {
         if (!gameInstance) return;
         const sudoku = gameInstance.getSudoku();
+        const fingerprint = sudoku.getFingerprint();
+
+        // 同步分支信息
+        if (session) {
+            exploreBranches.set(session.getBranchList());
+            const isConflict = !sudoku.isComplete() && sudoku.getGrid().flat().every(v => v !== 0); 
+            // 简单的冲突逻辑：填满了但不正确
+            
+            // 失败记忆检查
+            const isRevisited = session.checkFailed(gameInstance);
+            
+            exploreStatus.set({
+                active: true,
+                hasConflict: isConflict,
+                isRevisited: isRevisited,
+                currentBranchId: session.currentBranchId,
+                canExploreUndo: gameInstance.canUndo(), // 复用 Game 的能力
+                canExploreRedo: gameInstance.canRedo()
+            });
+
+            // 如果当前发现冲突，自动记录到失败记忆
+            if (isConflict) session.recordFailure(fingerprint);
+        } else {
+            exploreStatus.set({ active: false });
+            exploreBranches.set([]);
+        }
         const currentGrid = sudoku.getGrid();
         candidates.set(sudoku.getNotes());
         const invalidCells = []; // 逻辑同前...
@@ -103,7 +134,65 @@ function createGameStore() {
 
     return {
         subscribe: state.subscribe,
+        exploreStatus, // 暴露给新 Sidebar
+        exploreBranches,
+        startExplore() {
+            // 核心修复：如果游戏实例不存在，不允许开启探索
+            if (!gameInstance) {
+                console.warn("无法启动探索：请先开始一局游戏");
+                return; 
+            }
+            
+            // 只有存在 gameInstance 时才创建 session
+            session = new ExploreSession(gameInstance);
+            sync();
+        },
 
+        createExploreBranch(label) {
+            if (!session) return;
+            const id = session.createBranch(label, gameInstance);
+            sync();
+            return id;
+        },
+
+        switchExploreBranch(id) {
+            if (!session) return;
+            const branch = session.branches.get(id);
+            gameInstance.loadSnapshot(branch.snapshot);
+            session.currentBranchId = id;
+            sync();
+        },
+
+        backtrackExplore() {
+            if (!session) return;
+            // 回到最初起点
+            gameInstance.loadSnapshot(session.rootSnapshot);
+            session.currentBranchId = 0;
+            sync();
+        },
+
+        commitExplore() {
+            // 提交：保留当前棋盘，销毁会话
+            session = null;
+            sync();
+        },
+
+        cancelExplore() {
+            // 如果 session 根本没创建（比如初始化失败），直接返回
+            if (!session) {
+                sync();
+                return;
+            }
+            
+            const rootJSON = session.rootSnapshot;
+            gameInstance.loadSnapshot(rootJSON);
+            session = null;
+            sync();
+        },
+
+        // 探索模式下的撤销重做直接复用 Game 的
+        exploreUndo() { gameInstance.undo(); sync(); },
+        exploreRedo() { gameInstance.redo(); sync(); },
         // L1: 观察级
         requestPositionHint() {
             if (!gameInstance) return;
@@ -114,6 +203,7 @@ function createGameStore() {
                 
                 // 通过 sync 一次性更新所有状态
                 sync({
+                    showExplanation: true,
                     hintLevelInfo: { name: 'L1 观察级', desc: '指出值得关注的位置，不给数字。' },
                     explanation: {
                         row: move.row + 1,
@@ -136,6 +226,7 @@ function createGameStore() {
                 
                 // 同步
                 sync({
+                    showExplanation: true,
                     hintLevelInfo: { name: 'L2 候选级', desc: '显示候选并解释排除依据。' },
                     explanation: {
                         row: row + 1,
@@ -154,6 +245,7 @@ function createGameStore() {
                 if (hints && hints.useHint) hints.useHint();
                 
                 sync({
+                    showExplanation: true,
                     hintLevelInfo: { name: 'L3 决策级', desc: '直接给出确定数字并填入。' },
                     explanation: {
                         row: row + 1,
@@ -165,9 +257,11 @@ function createGameStore() {
         },
 
         closeExplanation() {
-            state.update(s => ({ ...s, explanation: null }));
+            state.update(s => ({ ...s, explanation: null, showExplanation: false }));
         },
-        
+        toggleExploreUI() {
+            state.update(s => ({ ...s, showExplore: !s.showExplore }));
+        },
         startNew(difficultyValue) {
             resetSession();
             const puzzle = generateSudoku(difficultyValue);

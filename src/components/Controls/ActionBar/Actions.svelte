@@ -32,8 +32,16 @@
 
 <!-- 按钮部分 -->
 <div class="action-buttons space-x-3">
-	<!-- ... 其他按钮 ... -->
-
+	<button 
+		class="btn btn-round" 
+		class:active={$gameStore.showExplore}
+		on:click={() => gameStore.toggleExploreUI()} 
+		title="打开探索面板"
+	>
+		<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A2 2 0 013 15.382V6.382a2 2 0 011.553-1.943L10 3l5.447 2.724A2 2 0 0117 7.618v9.018a2 2 0 01-1.553 1.943L9 20z" />
+		</svg>
+	</button>
 	<!-- 答案提示 -->
 	<button 
 		class="btn btn-round btn-badge" 

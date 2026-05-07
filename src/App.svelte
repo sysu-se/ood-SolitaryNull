@@ -8,6 +8,7 @@
 	import Header from './components/Header/index.svelte';
 	import Modal from './components/Modal/index.svelte';
 	import Sidebar from './components/Sidebar/Sidebar.svelte';
+	import ExploreSidebar from './components/Sidebar/ExploreSidebar.svelte';
 	import { gameStore } from './domain/store.js';
 	gameStore.subscribe(state => {
 		if (state.isComplete) {
@@ -45,6 +46,9 @@
     
     <!-- 接入侧边栏 -->
     <Sidebar {gameStore} />
+
+	<!-- 接入侧边栏 -->
+    <ExploreSidebar {gameStore} />
 </main>
 <!-- Keyboard -->
 <footer>

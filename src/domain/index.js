@@ -275,6 +275,10 @@ class Sudoku {
     }
     return str;
   }
+  getFingerprint() {
+    // 改进：指纹包含数字和笔记，实现精准记忆
+    return JSON.stringify(this.grid) + "|" + JSON.stringify(this.notes);
+  }
 }
 
 /**
@@ -489,6 +493,13 @@ class Game {
   getInitialGrid() {
         return cloneGrid(this.initialGrid);
     }
+  loadSnapshot(json) {
+    const restored = createGameFromJSON(json);
+    this.initialGrid = restored.initialGrid;
+    this.moves = restored.moves;
+    this.historyIndex = restored.historyIndex;
+    this._rebuild();
+  }
 }
 
 // --- 工厂函数 ---
@@ -541,3 +552,85 @@ export function createGameFromJSON(json) {
   game._rebuild();
   return game;
 }
+
+
+// src/domain/index.js
+
+/**
+ * 探索分支：记录某一个平行宇宙的状态
+ */
+class ExploreBranch {
+  constructor(id, parentId, label, gameSnapshot) {
+    this.id = id;
+    this.parentId = parentId;
+    this.label = label || `宇宙 #${id}`;
+    // 存储 Game 的 toJSON 快照，隔离引用
+    this.snapshot = gameSnapshot; 
+  }
+}
+
+/**
+ * 探索会话：管理所有的平行宇宙和失败记忆
+ */
+export class ExploreSession {
+  constructor(rootGame) {
+    // 改进 1：直接通过 rootGame 获取初始快照
+    this.rootSnapshot = rootGame.toJSON();
+    this.branches = new Map();
+    this.failedFingerprints = new Set();
+    this.nextBranchId = 1;
+    this.currentBranchId = 0;
+
+    // 默认创建主线分支
+    this.createBranch('初始分叉点', rootGame);
+  }
+
+  createBranch(label, currentGame) {
+    const id = this.nextBranchId++;
+    const branch = {
+      id,
+      parentId: this.currentBranchId,
+      label: label || `分支 #${id}`,
+      // 存储 Game 的快照，确保每个分支之间的数据彻底隔离
+      snapshot: currentGame.toJSON() 
+    };
+    this.branches.set(id, branch);
+    this.currentBranchId = id;
+    return id;
+  }
+
+  // 改进 2：指纹计算。本地 Sudoku 类已经有了 getFingerprint，直接调用
+  recordFailure(game) {
+    this.failedFingerprints.add(game.getSudoku().getFingerprint());
+  }
+
+  checkFailed(game) {
+    return this.failedFingerprints.has(game.getSudoku().getFingerprint());
+  }
+
+  // 改进 3：树形列表转换逻辑
+  getBranchList() {
+    const items = Array.from(this.branches.values());
+    const depthMap = new Map();
+
+    const calculateDepth = (branchId) => {
+      if (branchId === 0) return 0;
+      if (depthMap.has(branchId)) return depthMap.get(branchId);
+      
+      const b = this.branches.get(branchId);
+      const d = b.parentId === null ? 0 : calculateDepth(b.parentId) + 1;
+      depthMap.set(branchId, d);
+      return d;
+    };
+
+    return items.map(b => ({
+      id: b.id,
+      parentId: b.parentId,
+      label: b.label,
+      current: b.id === this.currentBranchId,
+      depth: calculateDepth(b.id)
+    }));
+  }
+  
+}
+
