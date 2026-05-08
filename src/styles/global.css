@@ -80,3 +80,11 @@ body {
 }
 
 @tailwind utilities;
+@layer utilities {
+  .shadow-outline {
+    @apply outline-none ring-4 ring-primary ring-opacity-50;
+  }
+  .shadow-outline-inverse {
+    @apply outline-none ring-4 ring-white ring-opacity-50;
+  }
+}

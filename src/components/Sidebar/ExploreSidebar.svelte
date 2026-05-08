@@ -42,7 +42,7 @@
     </div>
 
     <div class="branch-create">
-      <input class="branch-input" placeholder="新分支名称" bind:value={branchLabel} />
+      <input class="branch-input" placeholder="新分支名称" bind:value={branchLabel} on:keydown|stopPropagation on:keypress={(e) => e.key === 'Enter' && handleCreate()}/>
       <button class="mini-button primary" on:click={handleCreate}>新建</button>
     </div>
 
