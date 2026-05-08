@@ -90,35 +90,28 @@ export class Game {
    * @param {number} col - 列索引
    * @returns {boolean} 操作是否成功
    */
-  applyAnswerHint(row, col) {
-    if (this.isInitialCell(row, col)) {
-      console.warn('Cannot hint on initial cell');
-      return false;
-    }
+    applyAnswerHint(row, col) {
+        if (this.isInitialCell(row, col)) return false;
 
-    // 如果当前棋盘未求解过，求解一次并缓存
-    if (!this._cachedSolution) {
-      this._cachedSolution = this.currentSudoku.solve(this._solveSudoku);
-      if (!this._cachedSolution) {
-        console.warn('Puzzle has no solution');
-        return false;
-      }
-    }
+        try {
+            // 核心修改：始终基于 initialGrid（原始题面）进行求解
+            // 这样即使当前棋盘被填乱了，解出来的依然是正确答案
+            if (!this._cachedSolution) {
+                this._cachedSolution = this._solveSudoku(this.initialGrid); 
+            }
 
-    const answer = this.currentSudoku.getAnswer(row, col, this._solveSudoku);
-    if (answer === null) {
-      console.warn('Cell already filled or no answer available');
-      return false;
-    }
+            if (!this._cachedSolution) return false;
 
-    try {
-      this.guess({ row, col, value: answer }, false);
-      return true;
-    } catch (e) {
-      console.warn('Failed to apply hint:', e.message);
-      return false;
+            const answer = this._cachedSolution[row][col];
+            
+            // 执行落子逻辑（这会自动覆盖用户之前填错的数字）
+            this.guess({ row, col, value: answer }, false);
+            return true;
+        } catch (e) {
+            console.error("L3 Hint Solver Error:", e.message);
+            return e.message; // 返回 false 并在适配层处理 UI 提示
+        }
     }
-  }
 
   /**
    * 重置缓存 (在撤销/重做时调用)

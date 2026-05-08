@@ -31,7 +31,7 @@
 			title: 'Create Own',
 			text: 'Switch to the creator mode to create your own Sudoku puzzle?',
 			button: 'Continue',
-			onHide: game.resume,
+			onHide: gameStore.resume,
 			callback: () => {
 				//game.startCreatorMode();
 			},

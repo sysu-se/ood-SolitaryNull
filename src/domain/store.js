@@ -69,19 +69,26 @@ function createGameStore() {
                 }
             }
         }
-
+        const hasRuleConflict = invalidCells.length > 0;
         // 2. 探索模式同步
         if (session) {
+            // 2. 【核心改进】先检查：这个状态是不是已经存在于“黑名单”里了？
+            // 这代表用户是通过其他路径，或者撤销后再尝试，回到了一个已知失败的局面
+            const isRevisited = session.checkFailed(gameInstance);
+
+            // 3. 然后记录：如果当前有冲突，把它存入黑名单
+            if (hasRuleConflict) {
+                session.recordFailure(gameInstance);
+            }
+
             const currentBranch = session.branches.get(session.currentBranchId);
             exploreBranches.set(session.getBranchList());
             
-            if (invalidCells.length > 0) session.recordFailure(gameInstance);
-
             exploreStatus.set({
                 active: true,
                 currentBranchId: session.currentBranchId,
-                hasConflict: invalidCells.length > 0,
-                isRevisited: session.checkFailed(gameInstance),
+                hasConflict: hasRuleConflict, // 表达“当前这一步填错了”
+                isRevisited: isRevisited,     // 表达“你回到了一个曾经失败过的老路”
                 canExploreUndo: gameInstance.canUndo(currentBranch.branchStartIndex),
                 canExploreRedo: gameInstance.canRedo()
             });
@@ -204,6 +211,18 @@ function createGameStore() {
                     }
                 });
                 return true;
+            } else {
+                // 【新增反馈】如果求解失败（通常发生在非唯一解或无效题面上）
+                sync({
+                    showExplanation: true,
+                    hintLevelInfo: HINT_LEVELS.L3,
+                    explanation: { 
+                        row: row + 1, 
+                        col: col + 1, 
+                        text: "【决策失败】抱歉，我无法为该格子提供确定的答案。这可能是因为题面本身存在逻辑缺陷，或者正在尝试修改原始题面。" 
+                    }
+                });
+                return false;
             }
             return false;
         },
@@ -267,6 +286,7 @@ function createGameStore() {
             gameInstance.loadSnapshot(session.rootSnapshot);
             session.currentBranchId = 0;
             sync();
+            console.log("探索回溯：已回到最初的宇宙起点");
         },
 
         commitExplore() {

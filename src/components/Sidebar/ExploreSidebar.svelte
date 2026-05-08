@@ -66,7 +66,7 @@
             {#if branch.parentId !== null}
               继承自分支 #{branch.parentId}
             {:else}
-              🌱 初始宇宙
+              🌱 初始分支
             {/if}
           </span>
         </div>
@@ -101,7 +101,7 @@
     </div>
   {:else}
     <div class="empty-state text-sm text-gray-500">
-      开启探索模式后，您可以在不同的平行宇宙之间切换。
+      开启探索模式后，您可以在不同的平行分支之间切换。
     </div>
   {/if}
 </aside>
