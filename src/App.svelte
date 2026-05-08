@@ -7,7 +7,7 @@
 	import Controls from './components/Controls/index.svelte';
 	import Header from './components/Header/index.svelte';
 	import Modal from './components/Modal/index.svelte';
-	import Sidebar from './components/Sidebar/Sidebar.svelte';
+	import Sidebar from './components/Sidebar/HintSidebar.svelte';
 	import ExploreSidebar from './components/Sidebar/ExploreSidebar.svelte';
 	import { gameStore } from './domain/store.js';
 	gameStore.subscribe(state => {

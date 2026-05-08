@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Sudoku, Game, createSudoku, createGame } from '@sudoku/domain/index.js';
+import { Sudoku, Game, createSudoku, createGame } from '../../src/domain/index.js';
 
 describe('Sudoku Hint Methods', () => {
   let sudoku;

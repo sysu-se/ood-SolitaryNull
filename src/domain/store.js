@@ -1,10 +1,22 @@
 // src/domain/store.js
+/**
+ * @fileoverview Svelte 适配器层 (Adapter Pattern)
+ * 持有 Game 实例，负责 Svelte 响应式状态同步
+ */
+
 import { writable, get } from 'svelte/store';
-import { createSudoku, createGame, isValidPlacement } from './index.js';
+import { 
+    Sudoku, 
+    createGame, 
+    isValidPlacement, 
+    ExploreSession, 
+    generateReasonText, 
+    HINT_LEVELS 
+} from './index.js';
 import { generateSudoku, solveSudoku } from '@sudoku/sudoku';
 import { decodeSencode } from '@sudoku/sencode';
 
-// 导入所有需要重置的旧 Store (解决问题 5: 生命周期重置)
+// 导入需要联动的旧 Store
 import { timer } from '@sudoku/stores/timer';
 import { cursor } from '@sudoku/stores/cursor';
 import { hints } from '@sudoku/stores/hints';
@@ -12,7 +24,10 @@ import { candidates } from '@sudoku/stores/candidates';
 import { difficulty as legacyDifficultyStore } from '@sudoku/stores/difficulty';
 import { gamePaused } from '@sudoku/stores/game';
 import { grid as legacyGridStore } from '@sudoku/stores/grid';
-import { ExploreSession } from './index.js';
+
+/**
+ * 创建游戏适配器 Store
+ */
 function createGameStore() {
     const exploreStatus = writable({ active: false, canExploreUndo: false, canExploreRedo: false });
     const exploreBranches = writable([]);
@@ -25,29 +40,24 @@ function createGameStore() {
         isComplete: false,
         invalidCells: [],
         explanation: null, 
-        showExplanation: false, // 提示解释是否显示
-        showExplore: false,     // 探索面板是否显示
+        showExplanation: false,
+        showExplore: false,
         hintLevelInfo: { name: '等待指令', desc: '请选择一种提示方式' },
         isExploring: false
     });
 
     let gameInstance = null;
-    let session = null; // ExploreSession 实例
-   const generateReasonText = (row, col, type, candidates = []) => {
-        const r = row + 1;
-        const c = col + 1;
-        if (type === 'L1') return `【逻辑扫描】在第 ${r} 行第 ${c} 列发现突破口。根据排除法，该位置目前只有一个合法的数字可以填入，建议优先观察此处。`;
-        if (type === 'L2') return `【候选分析】已对第 ${r} 行第 ${c} 列进行了深度扫描。排除了同行、同列及同宫的干扰项，剩下的可能性（${candidates.join(', ')}）已为你标记。`;
-        if (type === 'L3') return `【决策辅助】经过全局唯一解计算，确定第 ${r} 行第 ${c} 列的最终答案。该步骤已录入历史记录，你可以随时撤销。`;
-        return "";
-    };
-    // 解决问题 6: 封装边界，不直接读取内部字段
+    let session = null; 
+
+    /**
+     * 同步领域层状态到 UI 层
+     */
     const sync = (extra = {}) => {
         if (!gameInstance) return;
         const sudoku = gameInstance.getSudoku();
         const currentGrid = sudoku.getGrid();
         
-        // 1. 计算冲突
+        // 1. 冲突扫描
         const invalidCells = [];
         for (let r = 0; r < 9; r++) {
             for (let c = 0; c < 9; c++) {
@@ -59,45 +69,32 @@ function createGameStore() {
                 }
             }
         }
+
+        // 2. 探索模式同步
         if (session) {
-        const currentBranch = session.branches.get(session.currentBranchId);
-        exploreBranches.set(session.getBranchList());
-        
-        // 如果当前有红字冲突，记录为失败路径
-        if (invalidCells.length > 0) session.recordFailure(gameInstance);
+            const currentBranch = session.branches.get(session.currentBranchId);
+            exploreBranches.set(session.getBranchList());
+            
+            if (invalidCells.length > 0) session.recordFailure(gameInstance);
 
-        exploreStatus.set({
-            active: true,
-            currentBranchId: session.currentBranchId,
-            hasConflict: invalidCells.length > 0,
-            isRevisited: session.checkFailed(gameInstance),
-            canExploreUndo: gameInstance.canUndo(currentBranch.branchStartIndex),
-            canExploreRedo: gameInstance.canRedo()
-        });
-    } else {
-        // 显式关闭状态
-        exploreStatus.set({ active: false });
-        exploreBranches.set([]);
-    }
+            exploreStatus.set({
+                active: true,
+                currentBranchId: session.currentBranchId,
+                hasConflict: invalidCells.length > 0,
+                isRevisited: session.checkFailed(gameInstance),
+                canExploreUndo: gameInstance.canUndo(currentBranch.branchStartIndex),
+                canExploreRedo: gameInstance.canRedo()
+            });
+        } else {
+            exploreStatus.set({ active: false });
+            exploreBranches.set([]);
+        }
 
-        // // 4. 【核心修复】将 extra 合并到 state 中，并正确同步计算结果
-        // state.update(s => ({
-        //     ...s,
-        //     grid: currentGrid,
-        //     initialGrid: gameInstance.getInitialGrid(),
-        //     canUndo: gameInstance.canUndo(),
-        //     canRedo: gameInstance.canRedo(),
-        //     isComplete: gameInstance.isComplete(),
-        //     invalidCells: invalidCells, // 修复：不再写死 []
-        //     isExploring: !!session,
-        //     ...extra // 修复：允许传入 showExplanation, showExplore 等
-        // }));
-        // 3. 更新主状态
+        // 3. 投影到主状态
         state.update(s => ({
             ...s,
             grid: currentGrid,
             initialGrid: gameInstance.getInitialGrid(),
-            // 核心要求：探索模式开启时，禁用全局 Undo/Redo
             canUndo: session ? false : gameInstance.canUndo(),
             canRedo: session ? false : gameInstance.canRedo(),
             isComplete: sudoku.isComplete(),
@@ -105,51 +102,147 @@ function createGameStore() {
             isExploring: !!session,
             ...extra
         }));
+
         candidates.set(sudoku.getNotes());
         legacyGridStore.set(gameInstance.getInitialGrid());
     };
 
-    // 解决问题 5: 统筹重置一局游戏的会话状态
     const resetSession = () => {
-    // 1. 重置计时器
-    if (timer && timer.reset) timer.reset();
-
-    // 2. 重置光标位置到左上角 (解决评审意见 5)
-    if (cursor && cursor.set) {
-        cursor.reset({ x: 0, y: 0 });
-    }
-
-    // 3. 清空所有笔记 (解决评审意见 5)
-    // 检查 candidates 是否有 set 方法 (通常 writable 都有，除非被封装了)
-    if (candidates.set) {
-        candidates.set({}); 
-    } else {
-        // 如果是严格封装的自定义 Store，循环调用其暴露的 clear 方法
-        for (let x = 0; x < 9; x++) {
-            for (let y = 0; y < 9; y++) {
-                candidates.clear({ x, y });
-            }
-        }
-    }
-
-    // 4. 重置提示次数 (如果业务要求新局重置)
-    if (hints) hints.reset(50); 
-};
+        if (timer && timer.reset) timer.reset();
+        if (cursor && cursor.set) cursor.reset({ x: 0, y: 0 });
+        if (candidates.set) candidates.set({});
+        if (hints) hints.reset(50); 
+    };
 
     return {
         subscribe: state.subscribe,
-        exploreStatus, // 暴露给新 Sidebar
+        exploreStatus,
         exploreBranches,
-        startExplore() {
-            // 核心修复：如果游戏实例不存在，不允许开启探索
-            if (!gameInstance) {
-                console.warn("无法启动探索：请先开始一局游戏");
-                return; 
-            }
-            
-            // 只有存在 gameInstance 时才创建 session
-            session = new ExploreSession(gameInstance);
+
+        // ========== 游戏生命周期 ==========
+        startNew(difficultyValue) {
+            resetSession();
+            const puzzle = generateSudoku(difficultyValue);
+            gameInstance = createGame({ sudoku: new Sudoku(puzzle), solveSudoku });
+            legacyDifficultyStore.set(difficultyValue);
+            gamePaused.set(false);
             sync();
+        },
+
+        startCustom(sencode) {
+            resetSession();
+            const puzzle = decodeSencode(sencode);
+            gameInstance = createGame({ sudoku: new Sudoku(puzzle), solveSudoku });
+            legacyDifficultyStore.set('custom'); 
+            gamePaused.set(false);
+            sync();
+        },
+
+        // ========== 提示系统 (L1/L2/L3 保持高度一致性) ==========
+        
+        // L1: 观察级提示 - 仅指出位置
+        requestPositionHint() {
+            if (!gameInstance) return;
+            const nextMoves = gameInstance.getHintNextMoves();
+            if (nextMoves.length > 0) {
+                const move = nextMoves[0];
+                if (cursor && cursor.set) cursor.set(move.col, move.row);
+                
+                sync({
+                    showExplanation: true,
+                    hintLevelInfo: HINT_LEVELS.L1,
+                    explanation: { 
+                        row: move.row + 1, 
+                        col: move.col + 1, 
+                        text: generateReasonText(move.row, move.col, 'L1') 
+                    }
+                });
+            }
+        },
+
+        // L2: 候选级提示 - 填写笔记并解释
+        applyCandidateHint(row, col) {
+            if (!gameInstance) return;
+            const hintSet = gameInstance.getHintCandidates(row, col);
+            if (hintSet && hintSet.size > 0) {
+                const cList = Array.from(hintSet);
+                gameInstance.guess({ row, col, value: cList, type: 'note-set' }, false);
+                
+                // 探索模式写穿透
+                if (session) session.updateCurrentSnapshot(gameInstance);
+                
+                sync({
+                    showExplanation: true,
+                    hintLevelInfo: HINT_LEVELS.L2,
+                    explanation: { 
+                        row: row + 1, 
+                        col: col + 1, 
+                        text: generateReasonText(row, col, 'L2', cList) 
+                    }
+                });
+            }
+        },
+
+        // L3: 决策级提示 - 直接填入正确数字
+        applyAnswerHint(row, col) {
+            if (!gameInstance) return false;
+            const success = gameInstance.applyAnswerHint(row, col);
+            if (success) {
+                if (hints && hints.useHint) hints.useHint();
+                if (candidates && candidates.clear) candidates.clear({ x: col, y: row });
+                
+                // 探索模式写穿透
+                if (session) session.updateCurrentSnapshot(gameInstance);
+                
+                sync({
+                    showExplanation: true,
+                    hintLevelInfo: HINT_LEVELS.L3,
+                    explanation: { 
+                        row: row + 1, 
+                        col: col + 1, 
+                        text: generateReasonText(row, col, 'L3') 
+                    }
+                });
+                return true;
+            }
+            return false;
+        },
+
+        // ========== 基础操作 ==========
+        guess(row, col, value) {
+            if (!gameInstance) return;
+            try {
+                gameInstance.guess({ row, col, value }, false);
+                if (candidates && candidates.clear) candidates.clear({ x: col, y: row });
+                if (session) session.updateCurrentSnapshot(gameInstance);
+                sync();
+            } catch (e) { console.warn(e.message); }
+        },
+
+        toggleNote(row, col, value) {
+            if (!gameInstance) return;
+            gameInstance.guess({ row, col, value, type: 'note-toggle' }, false);
+            if (session) session.updateCurrentSnapshot(gameInstance);
+            sync();
+        },
+
+        clearNote(row, col) {
+            if (!gameInstance) return;
+            gameInstance.guess({ row, col, type: 'note-clear' }, false);
+            if (session) session.updateCurrentSnapshot(gameInstance);
+            sync();
+        },
+
+        undo() { if (gameInstance) { gameInstance.undo(); sync(); } },
+        redo() { if (gameInstance) { gameInstance.redo(); sync(); } },
+        pause() { gamePaused.set(true); if (timer) timer.stop(); },
+        resume() { gamePaused.set(false); if (timer) timer.start(); },
+
+        // ========== 探索管理 ==========
+        startExplore() {
+            if (!gameInstance) return;
+            session = new ExploreSession(gameInstance);
+            sync({ showExplore: true });
         },
 
         createExploreBranch(label) {
@@ -171,29 +264,24 @@ function createGameStore() {
 
         backtrackExplore() {
             if (!session) return;
-            const currentBranch = session.branches.get(session.currentBranchId);
-            // 回到该分支刚刚创建时的那一刻
-            gameInstance.loadSnapshot(currentBranch.snapshot);
+            gameInstance.loadSnapshot(session.rootSnapshot);
+            session.currentBranchId = 0;
             sync();
         },
 
         commitExplore() {
-            if (!session) return;
-            // 逻辑：保留当前 gameInstance，销毁 session
             session = null;
-            // 状态更新：关闭面板，关闭开关
             sync({ showExplore: false }); 
         },
+
         cancelExplore() {
-            if (!session) return;
-            // 逻辑：恢复到进入探索前的 rootSnapshot
-            gameInstance.loadSnapshot(session.rootSnapshot);
-            session = null;
-            // 状态更新：关闭面板，关闭开关
+            if (session) {
+                gameInstance.loadSnapshot(session.rootSnapshot);
+                session = null;
+            }
             sync({ showExplore: false });
         },
 
-        // 探索模式下的撤销重做直接复用 Game 的
         exploreUndo() {
             if (!session) return;
             const currentBranch = session.branches.get(session.currentBranchId);
@@ -201,177 +289,19 @@ function createGameStore() {
             sync();
         },
 
-        exploreRedo() {
-            gameInstance.redo();
-            sync();
-        },
-        // 切换分支
-        switchExploreBranch(id) {
-            if (!session || id === session.currentBranchId) return;
-            
-            // 1. 保存当前分支的现状
-            session.updateCurrentSnapshot(gameInstance);
-            
-            // 2. 加载目标分支的快照
-            const targetBranch = session.branches.get(id);
-            gameInstance.loadSnapshot(targetBranch.snapshot);
-            
-            // 3. 更新会话状态
-            session.currentBranchId = id;
-            sync();
-        },
+        exploreRedo() { if (gameInstance) { gameInstance.redo(); sync(); } },
 
-        // 创建分支
-        createExploreBranch(label) {
-            if (!session) return;
-            // 1. 先保存当前进度到旧分支
-            session.updateCurrentSnapshot(gameInstance);
-            // 2. 创建新分支（内部会自动切换 currentBranchId）
-            const newId = session.createBranch(label, gameInstance);
-            sync();
-            return newId;
-        },
-        // 观察级提示
-        requestPositionHint() {
-            if (!gameInstance) return;
-            const nextMoves = gameInstance.getHintNextMoves();
-            if (nextMoves.length > 0) {
-                const move = nextMoves[0];
-                cursor.set(move.col, move.row);
-                sync({
-                    showExplanation: true,
-                    hintLevelInfo: { name: '观察级提示', desc: '指出值得关注的位置，不给数字。' },
-                    explanation: { row: move.row + 1, col: move.col + 1, text: generateReasonText(move.row, move.col, 'L1') }
-                });
-            }
-        },
-
-        // 候选数提示
-        applyCandidateHint(row, col) {
-        if (!gameInstance) return;
-        const hintSet = gameInstance.getHintCandidates(row, col);
-        if (hintSet && hintSet.size > 0) {
-            const cList = Array.from(hintSet);
-            gameInstance.guess({ row, col, value: cList, type: 'note-set' }, false);
-            // 提示也要保存到分支并弹出侧边栏
-            if (session) session.updateCurrentSnapshot(gameInstance);
-            sync({showExplanation: true,
-                hintLevelInfo: { name: '候选数提示', desc: '显示候选并解释排除依据。' },
-                explanation: {
-                    row: row + 1,
-                    col: col + 1,
-                    text: generateReasonText(row, col, 'L2', cList)
-                }});
-        }
-    },
-
-        // 答案提示
-        applyAnswerHint(row, col) {
-        if (!gameInstance) return;
-        const success = gameInstance.applyAnswerHint(row, col);
-        if (success) {
-            if (hints && hints.useHint) hints.useHint();
-            if (session) session.updateCurrentSnapshot(gameInstance);
-            sync({showExplanation: true,
-                hintLevelInfo: { name: '答案提示', desc: '直接给出确定数字并填入。' },
-                explanation: {
-                    row: row + 1,
-                    col: col + 1,
-                    text: generateReasonText(row, col, 'L3')
-                }});
-        }
-    },
-
+        // ========== UI 辅助 ==========
         closeExplanation() {
             state.update(s => ({ ...s, explanation: null, showExplanation: false }));
         },
+
         toggleExploreUI() {
             state.update(s => ({ ...s, showExplore: !s.showExplore }));
         },
-        startNew(difficultyValue) {
-            resetSession();
-            const puzzle = generateSudoku(difficultyValue);
-            gameInstance = createGame({ sudoku: createSudoku(puzzle) });
-            
-            legacyDifficultyStore.set(difficultyValue);
-            gamePaused.set(false);
-            sync();
-        },
 
-        startCustom(sencode) {
-            resetSession();
-            const puzzle = decodeSencode(sencode);
-            gameInstance = createGame({ sudoku: createSudoku(puzzle) });
-            
-            // 解决问题 4: 自定义题目元数据切换
-            legacyDifficultyStore.set('custom'); 
-            gamePaused.set(false);
-            sync();
-        },
-
-        // 解决问题 2: 提示流程收编进入领域模型
-        applyHint() {
-            if (!gameInstance) return;
-            
-            // 1. 从 cursor store 获取当前选中的坐标
-            const { x, y } = get(cursor); // 需要 import { get } from 'svelte/store'
-            if (x === null || y === null) return;
-
-            this.applyAnswerHint(y, x);
-        },
-        /**
-         * 获取下一步提示
-         * @returns {Array<{row: number, col: number, value: number}>}
-         */
-        getNextMovesHint() {
-            if (!gameInstance) return [];
-            return gameInstance.getHintNextMoves();
-        },
-
-        
-        /**
-         * 获取指定格子的候选数提示
-         * @param {number} row - 行索引 (0-8)
-         * @param {number} col - 列索引 (0-8)
-         * @returns {Set<number> | null}
-         */
-        getCandidatesHint(row, col) {
-            if (!gameInstance) return null;
-            try {
-                return gameInstance.getHintCandidates(row, col);
-            } catch (e) {
-                console.warn('getCandidatesHint error:', e.message);
-                return null;
-            }
-        },
-        
-        toggleNote(row, col, value) {
-        if (!gameInstance) return;
-        gameInstance.guess({ row, col, value, type: 'note-toggle' }, false);
-        this._afterWrite(); // 自动保存到分支
-    },
-        clearNote(row, col) {
-            if (!gameInstance) return;
-            // 记录为一个 note-clear 类型的 move
-            gameInstance.guess({ row, col, type: 'note-clear' }, false);
-            sync();
-        },
-        _afterWrite() {
-        if (session) session.updateCurrentSnapshot(gameInstance);
-        sync();
-    },
-        guess(row, col, value) {
-        if (!gameInstance) return;
-        try {
-            gameInstance.guess({ row, col, value }, false);
-            this._afterWrite(); // 自动保存到分支
-        } catch (e) { console.warn(e.message); }
-    },
-
-        undo() { if (gameInstance) { gameInstance.undo(); sync(); } },
-        redo() { if (gameInstance) { gameInstance.redo(); sync(); } },
-        pause() { gamePaused.set(true); timer.stop(); },
-        resume() { gamePaused.set(false); timer.start(); }
+        getNextMovesHintData() { return gameInstance ? gameInstance.getHintNextMoves() : []; },
+        getCandidatesHintData(r, c) { return gameInstance ? gameInstance.getHintCandidates(r, c) : null; }
     };
 }
 
